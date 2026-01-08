@@ -46,6 +46,7 @@ class Actions:
         self.action_registrar.register('TASK_WAIT', 'Wait a task')
         self.action_registrar.register('TASK_EDIT', 'Edit a task via the default editor')
         self.action_registrar.register('TASK_SHOW', 'Show task details')
+        self.action_registrar.register('MODIFY_DUE', 'Modify 1 task due')
 
     def get(self):
         return self.action_registry.actions

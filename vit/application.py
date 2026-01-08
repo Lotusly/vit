@@ -213,6 +213,8 @@ class Application:
         self.action_manager_registrar.register('TASK_EDIT', self.task_action_edit)
         self.action_manager_registrar.register('TASK_SHOW', self.task_action_show)
 
+        self.action_manager_registrar.register('MODIFY_DUE', self.task_action_modify_due)
+
     def default_keybinding_replacements(self):
         import json
         from datetime import datetime
@@ -402,6 +404,9 @@ class Application:
                     # before hitting enter?
                     if self.execute_command(['task', metadata['uuid'], 'modify'] + args, wait=self.wait):
                         self.activate_message_bar('Task %s modified' % self.model.task_id(metadata['uuid']))
+                elif op == 'modify-due':
+                    if self.execute_command(['task', metadata['uuid'], 'modify', f'due:{args[0]}'], wait=self.wait):
+                        self.activate_message_bar('Due date of task %s modified' % self.model.task_id(metadata['uuid']))
                 elif op == 'annotate':
                     task = self.model.task_annotate(metadata['uuid'], data['text'])
                     if task:
@@ -676,7 +681,7 @@ class Application:
         self.loop.stop()
         # TODO: This is a shitty hack, if not waiting, then we must
         # override the confirmation setting for recurring tasks.
-        if not wait and args[0] == 'task':
+        if not wait and args[0] in ['task', 'due']:
             args.insert(1, 'rc.recurrence.confirmation=no')
         def execute():
             returncode, output = self.command.result(args, **kwargs)
@@ -749,6 +754,12 @@ class Application:
 
     def activate_command_bar_add(self):
         self.activate_command_bar('add', 'Add: ')
+
+    def task_action_modify_due(self):
+        uuid, _ = self.get_focused_task()
+        if uuid:
+            self.activate_command_bar('modify-due', 'Modify due to: ', {'uuid': uuid})
+            self.task_list.focus_by_task_uuid(uuid, self.previous_focus_position)
 
     def task_done(self, uuid):
         success, task = self.model.task_done(uuid)
