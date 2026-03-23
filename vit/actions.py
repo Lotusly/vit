@@ -44,6 +44,7 @@ class Actions:
         self.action_registrar.register('TASK_PROJECT', 'Modify task project (supports tab completion)')
         self.action_registrar.register('TASK_TAGS', 'Modify task tags (supports tab completion, +TAG adds, -TAG removes)')
         self.action_registrar.register('TASK_WAIT', 'Wait a task')
+        self.action_registrar.register('TASK_BLOCKED_BY', 'Mark focused task blocked by another (numeric task id)')
         self.action_registrar.register('TASK_EDIT', 'Edit a task via the default editor')
         self.action_registrar.register('TASK_EDIT_NOTES', 'Edit Notes file for task in $EDITOR')
         self.action_registrar.register('TASK_SHOW', 'Show task details')

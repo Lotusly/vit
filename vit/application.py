@@ -216,6 +216,7 @@ class Application:
         self.action_manager_registrar.register('TASK_PROJECT', self.task_action_project)
         self.action_manager_registrar.register('TASK_TAGS', self.task_action_tags)
         self.action_manager_registrar.register('TASK_WAIT', self.task_action_wait)
+        self.action_manager_registrar.register('TASK_BLOCKED_BY', self.task_action_blocked_by)
         self.action_manager_registrar.register('TASK_EDIT', self.task_action_edit)
         self.action_manager_registrar.register('TASK_EDIT_NOTES', self.task_action_edit_notes)
         self.action_manager_registrar.register('TASK_SHOW', self.task_action_show)
@@ -389,6 +390,36 @@ class Application:
             elif op == 'filter':
                 self.extra_filters = args
                 self.update_report()
+            elif op == 'blocked-by':
+                if len(args) != 1 or not args[0].isdigit():
+                    self.activate_message_bar('Enter numeric task id of the blocking task', 'error')
+                else:
+                    blocker_id = args[0]
+                    rc, stdout, stderr = self.command.run(
+                        ['task', '_get', '%s.uuid' % blocker_id],
+                        capture_output=True,
+                    )
+                    if rc != 0:
+                        self.activate_message_bar(
+                            'Could not resolve task id %s: %s' % (blocker_id, stderr or 'unknown'),
+                            'error',
+                        )
+                    else:
+                        blocker_uuid = stdout.strip()
+                        if not blocker_uuid:
+                            self.activate_message_bar('Could not resolve task id %s' % blocker_id, 'error')
+                        elif blocker_uuid == metadata['uuid']:
+                            self.activate_message_bar('A task cannot depend on itself', 'error')
+                        # Taskwarrior 3.x expects depends:<uuid>, not depends:+<id> (rejects '+N').
+                        elif self.execute_command(
+                            ['task', metadata['uuid'], 'modify', 'depends:%s' % blocker_uuid],
+                            wait=self.wait,
+                        ):
+                            self.activate_message_bar(
+                                'Task %s now depends on task %s'
+                                % (self.model.task_id(metadata['uuid']), blocker_id),
+                            )
+                self.task_list.focus_by_task_uuid(metadata['uuid'], self.previous_focus_position)
             elif op == 'project':
                 # TODO: Validation if more than one arg passed.
                 project = args[0] if len(args) > 0 else ''
@@ -902,6 +933,12 @@ class Application:
         uuid, _ = self.get_focused_task()
         if uuid:
             self.activate_command_bar('wait', 'Wait: ', {'uuid': uuid})
+
+    def task_action_blocked_by(self):
+        uuid, _ = self.get_focused_task()
+        if uuid:
+            self.activate_command_bar('blocked-by', 'Blocked by task id: ', {'uuid': uuid})
+            self.task_list.focus_by_task_uuid(uuid, self.previous_focus_position)
 
     def task_action_edit(self):
         uuid, _ = self.get_focused_task()
