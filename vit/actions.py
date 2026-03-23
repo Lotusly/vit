@@ -45,8 +45,10 @@ class Actions:
         self.action_registrar.register('TASK_TAGS', 'Modify task tags (supports tab completion, +TAG adds, -TAG removes)')
         self.action_registrar.register('TASK_WAIT', 'Wait a task')
         self.action_registrar.register('TASK_EDIT', 'Edit a task via the default editor')
+        self.action_registrar.register('TASK_EDIT_NOTES', 'Edit Notes file for task in $EDITOR')
         self.action_registrar.register('TASK_SHOW', 'Show task details')
         self.action_registrar.register('MODIFY_DUE', 'Modify 1 task due')
+        self.action_registrar.register('SWITCH_ANNOTATION_DISPLAY_MODE', 'Switch annotation display mode')
 
     def get(self):
         return self.action_registry.actions

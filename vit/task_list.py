@@ -79,7 +79,7 @@ class TaskTable:
     def update_data(self, report, tasks):
         self.report = report
         self.tasks = tasks
-        self.list_walker.clear()
+        self.list_walker.clear() ########
         self.columns = []
         self.column_names = []
         self.rows = []
@@ -92,7 +92,7 @@ class TaskTable:
         self.project_cache = {}
         # TODO: This is for the project placeholders, feels sloppy.
         self.project_formatter = ProjectFormatter('project', self.report, self.formatter, self.get_blocking_task_uuids())
-        self.build_rows()
+        self.build_rows() ####
         self.clean_columns()
         self.project_column_idx = self.get_project_column_idx()
         self.reconcile_column_width_for_label()
@@ -138,10 +138,25 @@ class TaskTable:
     def update_focus(self):
         if self.listbox.focus:
             if self.listbox.previous_focus_position != self.listbox.focus_position:
-                if self.listbox.previous_focus_position is not None and self.listbox.previous_focus_position < len(self.list_walker):
-                    self.list_walker[self.listbox.previous_focus_position].reset_attr_map()
-                if self.listbox.focus_position is not None:
+                old_position = self.listbox.previous_focus_position
+                new_position = self.listbox.focus_position
+                
+                if old_position is not None and old_position < len(self.list_walker):
+                    self.list_walker[old_position].reset_attr_map()
+                if new_position is not None:
                     self.update_focus_attr('reveal focus')
+                    # Emit event when focus changes to a different task
+                    old_row = self.list_walker[old_position] if old_position is not None and old_position < len(self.list_walker) else None
+                    new_row = self.list_walker[new_position]
+                    old_uuid = old_row.uuid if old_row and hasattr(old_row, 'uuid') else None
+                    new_uuid = new_row.uuid if hasattr(new_row, 'uuid') else None
+                    if new_uuid:
+                        self.event.emit('task-list:focus:changed', {
+                            'old_uuid': old_uuid,
+                            'new_uuid': new_uuid,
+                            'old_position': old_position,
+                            'new_position': new_position
+                        })
                 self.listbox.previous_focus_position = self.listbox.focus_position
             else:
                 self.update_focus_attr('reveal focus')
@@ -152,6 +167,51 @@ class TaskTable:
         if position is None:
             position = self.listbox.focus_position
         self.list_walker[position].row.set_attr_map({None: attr})
+
+    def get_description_column_idx(self):
+        """Find the index of the description column."""
+        for idx, column in enumerate(self.columns):
+            if column['name'] == 'description':
+                return idx
+        return None
+
+    def update_row_description(self, position, focused_uuid):
+        """Re-render the description column for a specific row based on annotation display mode."""
+        if position is None or position >= len(self.list_walker):
+            return
+        
+        row_widget = self.list_walker[position]
+        if not hasattr(row_widget, 'task') or not row_widget.task:
+            return
+        
+        desc_col_idx = self.get_description_column_idx()
+        if desc_col_idx is None:
+            return
+        
+        # Get the description column formatter
+        desc_column = self.columns[desc_col_idx]
+        
+        # Temporarily set the focused UUID in the application for the formatter
+        if hasattr(self.formatter, 'application') and self.formatter.application:
+            self.formatter.application.focused_uuid = focused_uuid
+        
+        # Re-format the description
+        task = row_widget.task
+        formatted_value = desc_column['formatter'].format(task['description'], task)
+        _, text_markup = self.build_row_column(formatted_value)
+        
+        # Update the Text widget in the row
+        # The columns widget contains (width, widget) tuples
+        # We need to find the correct column, accounting for non_filtered_columns
+        actual_idx = 0
+        for i, col in enumerate(self.non_filtered_columns):
+            if col and col['name'] == 'description':
+                actual_idx = sum(1 for c in self.non_filtered_columns[:i] if c)
+                break
+        
+        if actual_idx < len(row_widget._columns.contents):
+            col_widget, col_options = row_widget._columns.contents[actual_idx]
+            col_widget.set_text(text_markup)
 
     def flash_focus(self, repeat_times=None, pause_seconds=None):
         if repeat_times is None:

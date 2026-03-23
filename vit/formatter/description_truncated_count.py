@@ -11,5 +11,8 @@ class DescriptionTruncatedCount(DescriptionCount):
         if not task['annotations']:
             return (width, colorized_description)
         else:
-            count_width, colorized_description = self.format_count(colorized_description, task)
-            return (width + count_width, colorized_description)
+            filtered_annotations = self.get_filtered_annotations(task)
+            if filtered_annotations:
+                count_width, colorized_description = self.format_count(colorized_description, filtered_annotations)
+                return (width + count_width, colorized_description)
+            return (width, colorized_description)

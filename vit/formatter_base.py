@@ -1,5 +1,6 @@
 from importlib import import_module
 from datetime import datetime, timedelta
+import os
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
@@ -8,6 +9,9 @@ except ImportError:
 from vit import util
 from vit import uda
 from vit.util import unicode_len
+
+# Path to taskopen notes directory
+NOTES_DIR = os.path.expanduser('~/Notes/tasknotes')
 
 INDICATORS = [
     'active',
@@ -20,12 +24,14 @@ UDA_DEFAULT_INDICATOR = 'U'
 DEFAULT_DESCRIPTION_TRUNCATE_LEN=20
 
 class FormatterBase:
-    def __init__(self, loader, config, task_config, markers, task_colorizer):
+    def __init__(self, loader, config, task_config, markers, task_colorizer, annotation_display_mode=1, application=None):
         self.loader = loader
         self.config = config
         self.task_config = task_config
         self.markers = markers
         self.task_colorizer = task_colorizer
+        self.annotation_display_mode = annotation_display_mode
+        self.application = application
         self.date_default = self.task_config.translate_date_markers(self.task_config.subtree('dateformat')["default"])
         self.report = self.task_config.translate_date_markers(self.task_config.subtree('dateformat.report')) or self.date_default
         self.annotation = self.task_config.translate_date_markers(self.task_config.subtree('dateformat.annotation')) or self.date_default
@@ -126,5 +132,78 @@ class FormatterBase:
 
     def get_until_state(self, until, task):
         return until and not util.task_completed(task)
+
+    def should_show_notes_annotation(self, task):
+        """
+        Determine if "Notes" annotations should be shown for a task based on annotation_display_mode.
+        Mode 1: Don't show "Notes" annotations
+        Mode 2: Show "Notes" annotations on selected task only
+        Mode 3: Show "Notes" annotations on all tasks
+        """
+        if self.annotation_display_mode == 3:
+            return True
+        elif self.annotation_display_mode == 2:
+            if self.application:
+                # MUST use cached value! During rendering, list_walker is empty
+                # so calling get_focused_task_uuid() would return None
+                focused_uuid = getattr(self.application, 'focused_uuid', None)
+                return focused_uuid is not None and focused_uuid == task['uuid']
+            return False
+        else:  # Mode 1
+            return False
+
+    def filter_annotations_by_mode(self, task, annotations):
+        """
+        Filter annotations based on annotation_display_mode.
+        - "Notes" annotations are filtered based on the mode
+        - Other annotations are always shown
+        """
+        if not annotations:
+            return []
+        
+        should_show_notes = self.should_show_notes_annotation(task)
+        
+        filtered = []
+        for ann in annotations:
+            if ann['description'] == 'Notes':
+                if should_show_notes:
+                    filtered.append(ann)
+            else:
+                # Always show non-"Notes" annotations
+                filtered.append(ann)
+        
+        return filtered
+
+    def get_notes_file_content(self, task_uuid, max_lines=10):
+        """
+        Read the contents of the notes file for a task.
+        Returns the file content or None if file doesn't exist.
+        
+        Args:
+            task_uuid: The UUID of the task
+            max_lines: Maximum number of lines to return (0 = all lines)
+        """
+        if not task_uuid:
+            return None
+        
+        notes_path = os.path.join(NOTES_DIR, task_uuid)
+        
+        if not os.path.exists(notes_path):
+            return None
+        
+        try:
+            with open(notes_path, 'r', encoding='utf-8') as f:
+                if max_lines > 0:
+                    lines = []
+                    for i, line in enumerate(f):
+                        if i >= max_lines:
+                            lines.append('  ...')
+                            break
+                        lines.append(line.rstrip('\n'))
+                    return '\n'.join(lines)
+                else:
+                    return f.read().rstrip('\n')
+        except (IOError, UnicodeDecodeError):
+            return None
 
 

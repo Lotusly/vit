@@ -3,6 +3,7 @@
 from importlib import import_module
 
 import os
+import shlex
 import signal
 import subprocess
 # TODO: Use regex module for better PCRE support?
@@ -17,7 +18,7 @@ import urwid
 
 from vit import version
 from vit.exception import VitException
-from vit.formatter_base import FormatterBase
+from vit.formatter_base import FormatterBase, NOTES_DIR
 from vit import event
 from vit.loader import Loader
 from vit.config_parser import ConfigParser, TaskParser
@@ -72,6 +73,9 @@ class MainFrame(urwid.Frame):
 
 class Application:
     def __init__(self, option, filters):
+        self.annotation_display_mode = 1 
+        self.focused_uuid = 0
+
         self.extra_filters = filters
         self.loader = Loader()
         self.load_early_config()
@@ -161,7 +165,8 @@ class Application:
         self.task_color_config = TaskColorConfig(self.config, self.task_config, self.theme, self.theme_alt_backgrounds)
         self.init_task_colors()
         self.task_colorizer = TaskColorizer(self.task_color_config)
-        self.formatter = FormatterBase(self.loader, self.config, self.task_config, self.markers, self.task_colorizer)
+        self.formatter = FormatterBase(self.loader, self.config, self.task_config, self.markers, self.task_colorizer, 
+                                       annotation_display_mode=self.annotation_display_mode, application = self)
         self.request_reply = RequestReply()
         self.set_request_callbacks()
         # TODO: TaskTable is dependent on a bunch of setup above, this order
@@ -172,6 +177,7 @@ class Application:
         self.event.listen('task:denotate', self.denotate_task)
         self.event.listen('action-manager:action-executed', self.action_manager_action_executed)
         self.event.listen('help:exit', self.deactivate_help)
+        self.event.listen('task-list:focus:changed', self.on_task_focus_changed)
 
     def setup_config(self):
         self.confirm = self.config.confirmation_enabled
@@ -211,9 +217,11 @@ class Application:
         self.action_manager_registrar.register('TASK_TAGS', self.task_action_tags)
         self.action_manager_registrar.register('TASK_WAIT', self.task_action_wait)
         self.action_manager_registrar.register('TASK_EDIT', self.task_action_edit)
+        self.action_manager_registrar.register('TASK_EDIT_NOTES', self.task_action_edit_notes)
         self.action_manager_registrar.register('TASK_SHOW', self.task_action_show)
 
         self.action_manager_registrar.register('MODIFY_DUE', self.task_action_modify_due)
+        self.action_manager_registrar.register('SWITCH_ANNOTATION_DISPLAY_MODE', self.task_action_switch_annotation_display_mode)
 
     def default_keybinding_replacements(self):
         import json
@@ -333,6 +341,28 @@ class Application:
             self.activate_message_bar('Task %s denotated' % self.model.task_id(task['uuid']))
             self.task_list.focus_by_task_uuid(data['uuid'], self.previous_focus_position)
 
+    def on_task_focus_changed(self, data):
+        """Handle focus change event - refresh display if showing notes on selected task only."""
+        if self.annotation_display_mode == 2:
+            old_uuid = data.get('old_uuid')
+            new_uuid = data.get('new_uuid')
+            old_position = data.get('old_position')
+            new_position = data.get('new_position')
+            
+            # Only update if the focused UUID actually changed
+            if new_uuid and new_uuid != getattr(self, 'focused_uuid', None):
+                # Update the cached focused UUID
+                self.focused_uuid = new_uuid
+                
+                # Efficiently update only the affected rows
+                # Update old row (hide its Notes annotation)
+                if old_position is not None:
+                    self.table.update_row_description(old_position, new_uuid)
+                
+                # Update new row (show its Notes annotation)
+                if new_position is not None:
+                    self.table.update_row_description(new_position, new_uuid)
+
     def command_bar_keypress(self, data):
         metadata = data['metadata']
         op = metadata['op']
@@ -397,7 +427,10 @@ class Application:
                 if op == 'add':
                     if self.execute_command(['task', 'add'] + args, wait=self.wait):
                         task = self.task_get_latest()
-                        self.activate_message_bar('Task %s added' % task_id_or_uuid_short(task))
+                        uuid = task_id_or_uuid_short(task)
+                        self.model.task_annotate('%s' % uuid, 'Notes')
+                        self.update_report()
+                        self.activate_message_bar('Task %s added' % uuid)
                         self.focus_new_task(task)
                 elif op == 'modify':
                     # TODO: Will this break if user clicks another list item
@@ -759,7 +792,18 @@ class Application:
         uuid, _ = self.get_focused_task()
         if uuid:
             self.activate_command_bar('modify-due', 'Modify due to: ', {'uuid': uuid})
-            self.task_list.focus_by_task_uuid(uuid, self.previous_focus_position)
+            self.task_list.focus_by_task_uuid(uuid)
+
+    def task_action_switch_annotation_display_mode(self):
+        uuid, _ = self.get_focused_task()
+        self.annotation_display_mode = (self.annotation_display_mode % 3) + 1
+        # Update the formatter's annotation display mode
+        self.formatter.annotation_display_mode = self.annotation_display_mode
+        self.update_report()
+        # Display current mode
+        mode_names = {1: "hidden", 2: "selected task only", 3: "all tasks"}
+        self.activate_message_bar('Annotation display mode: %s' % mode_names[self.annotation_display_mode])
+        self.task_list.focus_by_task_uuid(uuid)
 
     def task_done(self, uuid):
         success, task = self.model.task_done(uuid)
@@ -864,6 +908,38 @@ class Application:
         if uuid:
             self.execute_command(['task', uuid, 'edit'], wait=self.wait)
             self.task_list.focus_by_task_uuid(uuid, self.previous_focus_position)
+
+    def task_action_edit_notes(self):
+        uuid, task = self.get_focused_task()
+        if not uuid:
+            return
+        notes_path = os.path.join(NOTES_DIR, uuid)
+        try:
+            os.makedirs(NOTES_DIR, exist_ok=True)
+        except OSError as e:
+            self.activate_message_bar('Could not create notes directory: %s' % e, 'error')
+            return
+        if not os.path.exists(notes_path):
+            try:
+                open(notes_path, 'a', encoding='utf-8').close()
+            except OSError as e:
+                self.activate_message_bar('Could not create notes file: %s' % e, 'error')
+                return
+        if task and task['annotations']:
+            has_notes = any(a['description'] == 'Notes' for a in task['annotations'])
+            if not has_notes:
+                self.model.task_annotate(uuid, 'Notes')
+        editor = os.environ.get('EDITOR') or os.environ.get('VISUAL') or 'vi'
+        try:
+            editor_argv = shlex.split(editor)
+        except ValueError:
+            self.activate_message_bar('Invalid EDITOR/VISUAL', 'error')
+            return
+        if not editor_argv:
+            self.activate_message_bar('EDITOR/VISUAL is empty', 'error')
+            return
+        self.execute_command(editor_argv + [notes_path], wait=self.wait)
+        self.task_list.focus_by_task_uuid(uuid, self.previous_focus_position)
 
     def task_action_show(self):
         uuid, _ = self.get_focused_task()
@@ -983,6 +1059,9 @@ class Application:
         start = time.time()
         self.task_list = self.table.listbox
         self.previous_focus_position = self.task_list.focus_position if self.task_list.list_walker else 0
+        # CRITICAL: Capture focused UUID BEFORE update_task_table() clears the list_walker
+        # When formatters run during build_rows(), the walker is empty, so we need this cache
+        self.focused_uuid, _ = self.get_focused_task()
         if report:
             self.report = report
         self.set_active_context()

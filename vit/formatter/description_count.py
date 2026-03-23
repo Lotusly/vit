@@ -10,12 +10,15 @@ class DescriptionCount(Description):
         if not task['annotations']:
             return (width, colorized_description)
         else:
-            count_width, colorized_description = self.format_count(colorized_description, task)
-            return (width + count_width, colorized_description)
+            filtered_annotations = self.get_filtered_annotations(task)
+            if filtered_annotations:
+                count_width, colorized_description = self.format_count(colorized_description, filtered_annotations)
+                return (width + count_width, colorized_description)
+            return (width, colorized_description)
 
-    def format_count(self, colorized_description, task):
-        count_string = self.format_annotation_count(task)
+    def format_count(self, colorized_description, filtered_annotations):
+        count_string = self.format_annotation_count(filtered_annotations)
         return unicode_len(count_string), colorized_description + [(None, count_string)]
 
-    def format_annotation_count(self, task):
-        return " [%d]" % len(task['annotations'])
+    def format_annotation_count(self, filtered_annotations):
+        return " [%d]" % len(filtered_annotations)
