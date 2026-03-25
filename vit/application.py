@@ -22,7 +22,14 @@ from vit.formatter_base import FormatterBase, NOTES_DIR
 from vit import event
 from vit.loader import Loader
 from vit.config_parser import ConfigParser, TaskParser
-from vit.util import clear_screen, string_to_args, is_mouse_event, task_id_or_uuid_short
+from vit.util import (
+    clear_screen,
+    is_mouse_event,
+    string_to_args,
+    string_to_args_for_task_add,
+    string_to_args_for_task_modify,
+    task_id_or_uuid_short,
+)
 from vit.process import Command
 from vit.task import TaskListModel
 from vit.autocomplete import AutoComplete
@@ -384,7 +391,12 @@ class Application:
                     self.update_report()
                     self.activate_message_bar('Task %s priority set to: %s' % (self.model.task_id(task['uuid']), task['priority'] or 'None'))
         elif data['key'] in ('enter',):
-            args = string_to_args(data['text'])
+            if op == 'add':
+                args = string_to_args_for_task_add(data['text'])
+            elif op == 'modify':
+                args = string_to_args_for_task_modify(data['text'])
+            else:
+                args = string_to_args(data['text'])
             if op == 'ex':
                 metadata = self.ex(data['text'], data['metadata'])
             elif op == 'filter':

@@ -8,6 +8,7 @@ except ImportError:
 
 from vit import util
 from vit import uda
+from vit.formatter import Formatter
 from vit.util import unicode_len
 
 # Path to taskopen notes directory
